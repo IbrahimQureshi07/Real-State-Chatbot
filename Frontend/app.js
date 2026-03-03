@@ -14,6 +14,21 @@ function addMessage(text, isUser) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+function showLoader() {
+  const div = document.createElement("div");
+  div.className = "message bot loader-wrap";
+  div.id = "typing-loader";
+  div.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+function hideLoader() {
+  const el = document.getElementById("typing-loader");
+  if (el) el.remove();
+}
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const question = input.value.trim();
@@ -22,6 +37,7 @@ form.addEventListener("submit", async (e) => {
   addMessage(question, true);
   input.value = "";
   sendBtn.disabled = true;
+  showLoader();
 
   try {
     const res = await fetch(API_URL + "/chat", {
@@ -30,8 +46,10 @@ form.addEventListener("submit", async (e) => {
       body: JSON.stringify({ message: question }),
     });
     const data = await res.json();
+    hideLoader();
     addMessage(data.answer || "No answer returned.", false);
   } catch (err) {
+    hideLoader();
     addMessage("Error: " + (err.message || "Could not reach the server. Is the backend running on port 8000?"), false);
   } finally {
     sendBtn.disabled = false;
