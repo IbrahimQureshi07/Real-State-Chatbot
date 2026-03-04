@@ -27,7 +27,9 @@ Thoda time lagega (1–2 min). Jab "Successfully installed" dikhe, next step. **
 
 ---
 
-## Step 4: FAQ index karo (sirf pehli baar)
+## Step 4: FAQ index karo (sirf pehli baar, ya jab naya Pinecone index banao)
+**Zaroori:** Agar tumne naya Pinecone index banaya ho (e.g. 1024 dimensions), to **ek baar** `index_faq.py` zaroor chalao taake FAQ data us index mein upload ho. Bina iske chatbot ko relevant answers nahi milenge.
+
 **Option A (easy):** `Backend` folder kholo → **`run_index_once.bat`** pe double-click karo. Jab "Done" dikhe, next step.
 
 **Option B (terminal):** Zaroor pehle Step 2 chala ke `Backend` mein ho jao, phir ye ek line copy-paste karo:
@@ -78,3 +80,4 @@ http://localhost:8000
 - **"requirements.txt not found"** → Step 2 sahi se karo, `Backend` folder mein hona chahiye.
 - **"Failed to fetch"** → Backend (Step 5) chal raha hona chahiye; **http://localhost:8000** use karo, file:// mat use karo.
 - **PowerShell arrow error** → `→` mat type karo. Har command alag line pe type karo aur Enter dabao.
+- **Railway: "The executable cd could not be found"** → Railway service **Settings** mein jao, **Start Command** ko khali chhod do (taake Dockerfile ka CMD use ho) ya sirf ye likho: `uvicorn main:app --host 0.0.0.0 --port $PORT`. `cd Backend` mat use karo.

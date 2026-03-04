@@ -15,7 +15,8 @@ from pinecone import Pinecone
 
 load_dotenv()
 
-TOP_K = 5
+TOP_K = 15
+MIN_SCORE = 0.4  # Use chunks with similarity above this so link-rich chunks aren't dropped
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSIONS = 1024
 OPENAI_MODEL = "gpt-4o-mini"
@@ -75,13 +76,18 @@ class ChatResponse(BaseModel):
     sources: list[str]
 
 
-SYSTEM_PROMPT = """You are a helpful FAQ assistant for South Carolina Real Estate & Licensing (SCREC). Follow these rules:
+SYSTEM_PROMPT = """You are a helpful FAQ assistant for South Carolina Real Estate & Licensing (SCREC). Your answers must come from the "Context from FAQ" provided below.
 
-1. If the user only says a greeting (e.g. hi, hey, hello, what's up) or something clearly off-topic, reply in one short, friendly sentence and invite them to ask about real estate or licensing in South Carolina. Do not paste FAQ content.
+Rules:
+1. If the user only says a greeting (hi, hello, hey) or something off-topic, reply in one short friendly sentence and invite them to ask about real estate or licensing in South Carolina.
 
-2. If the user asks a real question about real estate or licensing, use ONLY the "Context from FAQ" below to write one clear, coherent answer. Synthesize the information—do not list multiple separate answers or repeat the same definition. Write as a single helpful paragraph (or two if needed). Do not make up information; if the context does not contain the answer, say so briefly.
+2. When the user asks about real estate or licensing: Use the "Context from FAQ" below. When that context contains real FAQ content, write a clear, direct answer in plain language. Do not say you lack information when the context clearly contains the answer.
 
-3. Keep answers focused and in plain language. Do not include question numbers or "Q:" in your reply."""
+3. IMPORTANT – Links and URLs: If the context contains any URLs, application links, or PDF links (e.g. "Online Applications Link: https://...", "PDF Exam Application Link: https://..."), you MUST include those exact links in your answer. When the user asks how to apply online or for application links, give them the links from the context. Do not reply with "contact the Commission" or "visit the website" when the context already provides the specific link.
+
+4. Only say you don't have specific information or suggest contacting the Commission when the context is literally "(No relevant FAQ context found.)" or empty.
+
+5. Do not make up facts. Do not include "Q:" or question numbers. Keep the tone helpful and professional."""
 
 
 def generate_answer_with_openai(user_message: str, context: str) -> str | None:
@@ -105,18 +111,30 @@ def generate_answer_with_openai(user_message: str, context: str) -> str | None:
     return None
 
 
+def _embedding_query(message: str) -> str:
+    """Expand query for retrieval when user asks for links/apply online, so we fetch link-rich chunks."""
+    msg = message.lower().strip()
+    if any(w in msg for w in ("link", "apply online", "application link", "url", "website", "where to apply")):
+        return message + " PDF Exam Application Link Online Applications Link instructions apply"
+    return message
+
+
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     if not req.message.strip():
         return ChatResponse(answer="Please ask a question.", sources=[])
 
     index = get_index()
-    query_embedding = get_embedding(req.message.strip())
+    query_for_retrieval = _embedding_query(req.message.strip())
+    query_embedding = get_embedding(query_for_retrieval)
     result = index.query(vector=query_embedding, top_k=TOP_K, include_metadata=True)
 
     sources = []
     texts = []
     for match in result.get("matches", []):
+        score = match.get("score")
+        if score is not None and score < MIN_SCORE:
+            continue
         meta = match.get("metadata") or {}
         text = meta.get("text", "")
         if text:
@@ -124,8 +142,10 @@ def chat(req: ChatRequest):
             texts.append(text)
 
     context = "\n\n---\n\n".join(texts) if texts else ""
+    # When no chunks retrieved, LLM must know so it can say "no info" instead of hallucinating
+    context_for_llm = context if context.strip() else "(No relevant FAQ context found.)"
 
-    answer = generate_answer_with_openai(req.message.strip(), context or "(No relevant FAQ context found.)")
+    answer = generate_answer_with_openai(req.message.strip(), context_for_llm)
     if answer:
         return ChatResponse(answer=answer, sources=[])
     if texts:
