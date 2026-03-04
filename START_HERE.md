@@ -81,3 +81,4 @@ http://localhost:8000
 - **"Failed to fetch"** → Backend (Step 5) chal raha hona chahiye; **http://localhost:8000** use karo, file:// mat use karo.
 - **PowerShell arrow error** → `→` mat type karo. Har command alag line pe type karo aur Enter dabao.
 - **Railway: "The executable cd could not be found"** → Railway service **Settings** mein jao, **Start Command** ko khali chhod do (taake Dockerfile ka CMD use ho) ya sirf ye likho: `uvicorn main:app --host 0.0.0.0 --port $PORT`. `cd Backend` mat use karo.
+- **Railway: "Application failed to respond"** → Service **Settings** → **Networking** / **Public Networking** → "Generate Service Domain" wale box mein port **8000** likho (3080 mat chhodna). Phir **Generate Domain** / save karo. Agar domain pehle se hai to port edit karke 8000 set karo.
