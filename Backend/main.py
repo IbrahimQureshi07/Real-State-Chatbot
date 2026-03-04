@@ -1,6 +1,6 @@
 """
 FastAPI backend: /chat endpoint + serves Frontend so you open one URL (no file://).
-Retrieves FAQ chunks from Pinecone, then uses OpenAI to synthesize one answer (or handle greetings).
+Uses OpenAI for embeddings (1024 dims) and for answer generation. No sentence-transformers.
 """
 import os
 from pathlib import Path
@@ -10,14 +10,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
+from openai import OpenAI
 from pinecone import Pinecone
 
 load_dotenv()
 
-MODEL_NAME = "all-MiniLM-L6-v2"
 TOP_K = 5
-OPENAI_MODEL = "gpt-4o-mini"  # fast and cheap; change to gpt-4o if you prefer
+EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_DIMENSIONS = 1024
+OPENAI_MODEL = "gpt-4o-mini"
 
 app = FastAPI(title="FAQ Chatbot API")
 app.add_middleware(
@@ -28,16 +29,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Lazy-load model and Pinecone
-_model = None
+_openai_client = None
 _index = None
 
 
-def get_model():
-    global _model
-    if _model is None:
-        _model = SentenceTransformer(MODEL_NAME)
-    return _model
+def get_openai_client():
+    global _openai_client
+    if _openai_client is None:
+        key = os.getenv("OPENAI_API_KEY")
+        if not key or not key.strip():
+            raise RuntimeError("OPENAI_API_KEY not set")
+        _openai_client = OpenAI(api_key=key.strip())
+    return _openai_client
+
+
+def get_embedding(text: str) -> list[float]:
+    """Get 1024-dim embedding for one text (user query)."""
+    client = get_openai_client()
+    r = client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=[text],
+        dimensions=EMBEDDING_DIMENSIONS,
+    )
+    return r.data[0].embedding
 
 
 def get_index():
@@ -71,13 +85,11 @@ SYSTEM_PROMPT = """You are a helpful FAQ assistant for South Carolina Real Estat
 
 
 def generate_answer_with_openai(user_message: str, context: str) -> str | None:
-    """Call OpenAI to produce one refined answer. Returns None if no key or API error."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key or not api_key.strip():
         return None
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key.strip())
+        client = get_openai_client()
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
@@ -98,10 +110,8 @@ def chat(req: ChatRequest):
     if not req.message.strip():
         return ChatResponse(answer="Please ask a question.", sources=[])
 
-    model = get_model()
     index = get_index()
-
-    query_embedding = model.encode([req.message]).tolist()[0]
+    query_embedding = get_embedding(req.message.strip())
     result = index.query(vector=query_embedding, top_k=TOP_K, include_metadata=True)
 
     sources = []
@@ -115,11 +125,9 @@ def chat(req: ChatRequest):
 
     context = "\n\n---\n\n".join(texts) if texts else ""
 
-    # Use OpenAI to produce one answer (handles greetings and synthesizes FAQ into one reply)
     answer = generate_answer_with_openai(req.message.strip(), context or "(No relevant FAQ context found.)")
     if answer:
         return ChatResponse(answer=answer, sources=[])
-    # Fallback if no OpenAI key or API error: return single concatenated block (no "---" list)
     if texts:
         answer = "\n\n".join(texts)[:8000]
     else:
@@ -132,7 +140,6 @@ def health():
     return {"status": "ok"}
 
 
-# Serve Frontend from same server so you open http://localhost:8000 (no file://, no CORS)
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "Frontend"
 if FRONTEND_DIR.exists():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

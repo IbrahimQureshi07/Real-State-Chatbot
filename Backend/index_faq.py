@@ -1,6 +1,6 @@
 """
-One-time script: Load FAQ file, chunk by Q&A, embed with sentence-transformers (384),
-and upsert to Pinecone index.
+One-time script: Load FAQ file, chunk by Q&A, embed with OpenAI (1024 dims),
+and upsert to Pinecone index. No sentence-transformers — small deploy image.
 Run: python index_faq.py
 """
 import os
@@ -9,26 +9,25 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
+from openai import OpenAI
 from pinecone import Pinecone
 
 load_dotenv()
 
 FAQ_PATH = Path(__file__).parent / "Frequently Asked Questions.md.txt"
-BATCH_SIZE = 100
-MODEL_NAME = "all-MiniLM-L6-v2"  # 384 dimensions
+BATCH_SIZE = 50
+EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_DIMENSIONS = 1024
 
 
 def chunk_faq(text: str) -> list[str]:
     """Split FAQ into chunks by numbered questions (e.g. '1. ' or '2.\t')."""
-    # Split when we see a new line that starts with digits and a period
     parts = re.split(r"\n(?=\d+[.\t]\s)", text)
     chunks = []
     for p in parts:
         p = p.strip()
         if not p or len(p) < 20:
             continue
-        # Optional: limit chunk size (e.g. 1500 chars) and split if needed
         if len(p) > 2000:
             for i in range(0, len(p), 1500):
                 chunk = p[i : i + 1500].strip()
@@ -39,11 +38,24 @@ def chunk_faq(text: str) -> list[str]:
     return chunks
 
 
+def get_embeddings(client: OpenAI, texts: list[str]) -> list[list[float]]:
+    """Get OpenAI embeddings for a batch of texts (1024 dims)."""
+    response = client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=texts,
+        dimensions=EMBEDDING_DIMENSIONS,
+    )
+    return [item.embedding for item in response.data]
+
+
 def main():
     api_key = os.getenv("PINECONE_API_KEY")
     index_name = os.getenv("PINECONE_INDEX_NAME", "faq-chatbot")
+    openai_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise SystemExit("Missing PINECONE_API_KEY in .env")
+    if not openai_key:
+        raise SystemExit("Missing OPENAI_API_KEY in .env")
 
     if not FAQ_PATH.exists():
         raise SystemExit(f"FAQ file not found: {FAQ_PATH}")
@@ -53,10 +65,8 @@ def main():
     chunks = chunk_faq(text)
     print(f"Got {len(chunks)} chunks.")
 
-    print("Loading embedding model...")
-    model = SentenceTransformer(MODEL_NAME)
-
-    print("Connecting to Pinecone...")
+    print("Connecting to OpenAI and Pinecone...")
+    openai_client = OpenAI(api_key=openai_key.strip())
     pc = Pinecone(api_key=api_key)
     index = pc.Index(index_name)
 
@@ -64,8 +74,7 @@ def main():
     for i in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[i : i + BATCH_SIZE]
         ids = [str(uuid.uuid4()) for _ in batch]
-        emb = model.encode(batch).tolist()
-        # Store full text in metadata (Pinecone allows ~40KB per value)
+        emb = get_embeddings(openai_client, batch)
         vectors = [
             {"id": id_, "values": vec, "metadata": {"text": txt[:30000]}}
             for id_, vec, txt in zip(ids, emb, batch)
