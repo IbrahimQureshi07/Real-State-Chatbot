@@ -6,6 +6,9 @@ const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const messagesEl = document.getElementById("messages");
 
+// Conversation memory: last 10 messages (5 user + 5 bot) so the bot can recall what was discussed
+let chatHistory = [];
+
 function addMessage(text, isUser) {
   const div = document.createElement("div");
   div.className = "message " + (isUser ? "user" : "bot");
@@ -43,11 +46,16 @@ form.addEventListener("submit", async (e) => {
     const res = await fetch(API_URL + "/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: question }),
+      body: JSON.stringify({ message: question, history: chatHistory }),
     });
     const data = await res.json();
     hideLoader();
-    addMessage(data.answer || "No answer returned.", false);
+    const answer = data.answer || "No answer returned.";
+    addMessage(answer, false);
+    // Keep last 10 messages for memory (so bot can answer "what did I ask?")
+    chatHistory.push({ role: "user", content: question });
+    chatHistory.push({ role: "assistant", content: answer });
+    if (chatHistory.length > 10) chatHistory = chatHistory.slice(-10);
   } catch (err) {
     hideLoader();
     addMessage("Error: " + (err.message || "Could not reach the server. Is the backend running on port 8000?"), false);
