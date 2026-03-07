@@ -1,14 +1,19 @@
 """
 FastAPI backend: /chat endpoint + serves Frontend so you open one URL (no file://).
 Uses OpenAI for embeddings (1024 dims) and for answer generation. No sentence-transformers.
+Logs every user question to PostgreSQL (Railway) so the admin can see what users ask.
 """
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 
+import psycopg2
+import psycopg2.extras
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from openai import OpenAI
@@ -33,6 +38,70 @@ app.add_middleware(
 
 _openai_client = None
 _index = None
+
+
+# ── PostgreSQL helpers ────────────────────────────────────────────────────────
+
+def _db_connect():
+    """Return a fresh psycopg2 connection, or None if DATABASE_URL not configured."""
+    url = os.getenv("DATABASE_URL", "").strip()
+    if not url:
+        return None
+    # psycopg2 needs postgresql:// not postgres://
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    try:
+        conn = psycopg2.connect(url, connect_timeout=5)
+        conn.autocommit = True
+        return conn
+    except Exception as e:
+        print(f"[DB] connect error: {e}")
+        return None
+
+
+def init_db():
+    """Create the questions table if it does not exist."""
+    conn = _db_connect()
+    if not conn:
+        print("[DB] DATABASE_URL not set – question logging disabled.")
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS questions (
+                    id        SERIAL PRIMARY KEY,
+                    question  TEXT        NOT NULL,
+                    answer    TEXT,
+                    asked_at  TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+        print("[DB] Table 'questions' ready.")
+    except Exception as e:
+        print(f"[DB] init error: {e}")
+    finally:
+        conn.close()
+
+
+def log_question(question: str, answer: str) -> None:
+    """Insert one row into questions table. Silently skips on any error."""
+    conn = _db_connect()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO questions (question, answer) VALUES (%s, %s)",
+                (question, answer[:1000] if answer else ""),
+            )
+    except Exception as e:
+        print(f"[DB] log error: {e}")
+    finally:
+        conn.close()
+
+
+@app.on_event("startup")
+def startup():
+    init_db()
 
 
 def get_openai_client():
@@ -193,17 +262,103 @@ def chat(req: ChatRequest):
     answer = generate_answer_with_openai(req.message.strip(), context_for_llm, history_dicts)
     if answer:
         clean_answer, suggestions = _parse_suggestions_from_answer(answer)
+        log_question(req.message.strip(), clean_answer)
         return ChatResponse(answer=clean_answer, sources=[], suggestions=suggestions)
     if texts:
         answer = "\n\n".join(texts)[:8000]
     else:
         answer = "No relevant answer found in the FAQ. Try asking about real estate or licensing in South Carolina."
+    log_question(req.message.strip(), answer)
     return ChatResponse(answer=answer, sources=sources, suggestions=[])
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ── Admin endpoints ───────────────────────────────────────────────────────────
+
+@app.get("/admin/questions")
+def admin_questions_json():
+    """Return all logged questions as JSON (newest first)."""
+    conn = _db_connect()
+    if not conn:
+        return {"error": "DATABASE_URL not configured", "questions": []}
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT id, question, answer, asked_at FROM questions ORDER BY asked_at DESC")
+            rows = cur.fetchall()
+        return {"total": len(rows), "questions": [dict(r) for r in rows]}
+    except Exception as e:
+        return {"error": str(e), "questions": []}
+    finally:
+        conn.close()
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    """Simple HTML dashboard showing all user questions."""
+    conn = _db_connect()
+    rows = []
+    error = ""
+    if not conn:
+        error = "DATABASE_URL not configured – logging is disabled."
+    else:
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT id, question, answer, asked_at FROM questions ORDER BY asked_at DESC"
+                )
+                rows = cur.fetchall()
+        except Exception as e:
+            error = str(e)
+        finally:
+            conn.close()
+
+    rows_html = ""
+    for r in rows:
+        asked = str(r["asked_at"])[:19].replace("T", " ")
+        q = str(r["question"]).replace("<", "&lt;").replace(">", "&gt;")
+        a = str(r["answer"] or "")[:200].replace("<", "&lt;").replace(">", "&gt;")
+        rows_html += f"""
+        <tr>
+          <td>{r['id']}</td>
+          <td>{asked}</td>
+          <td>{q}</td>
+          <td class="ans">{a}{"…" if len(str(r["answer"] or "")) > 200 else ""}</td>
+        </tr>"""
+
+    error_html = f'<p class="err">{error}</p>' if error else ""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>FAQ Chatbot – Admin</title>
+<style>
+  body{{font-family:system-ui,sans-serif;background:#1a1b26;color:#c0caf5;padding:2rem;}}
+  h1{{color:#7aa2f7;margin-bottom:0.25rem;}}
+  p.sub{{color:#a9b1d6;margin-top:0;}}
+  .err{{color:#f7768e;}}
+  table{{width:100%;border-collapse:collapse;margin-top:1.5rem;}}
+  th{{background:#414868;color:#e0af68;padding:0.6rem 0.8rem;text-align:left;}}
+  td{{padding:0.55rem 0.8rem;border-bottom:1px solid #414868;vertical-align:top;}}
+  td.ans{{color:#a9b1d6;font-size:0.85rem;}}
+  tr:hover td{{background:#24283b;}}
+  .badge{{background:#7aa2f7;color:#1a1b26;border-radius:999px;padding:0.15rem 0.6rem;font-size:0.8rem;}}
+</style>
+</head>
+<body>
+<h1>FAQ Chatbot – Questions Log</h1>
+<p class="sub">Total questions: <span class="badge">{len(rows)}</span></p>
+{error_html}
+<table>
+  <thead><tr><th>#</th><th>Time</th><th>Question</th><th>Answer (preview)</th></tr></thead>
+  <tbody>{rows_html if rows_html else '<tr><td colspan="4" style="text-align:center;color:#a9b1d6;">No questions yet.</td></tr>'}</tbody>
+</table>
+</body>
+</html>"""
 
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "Frontend"
