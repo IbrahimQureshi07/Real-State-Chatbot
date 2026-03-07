@@ -3,6 +3,7 @@ FastAPI backend: /chat endpoint + serves Frontend so you open one URL (no file:/
 Uses OpenAI for embeddings (1024 dims) and for answer generation. No sentence-transformers.
 Logs every user question to PostgreSQL (Railway) so the admin can see what users ask.
 """
+import html
 import os
 import re
 from datetime import datetime
@@ -13,7 +14,8 @@ import psycopg2.extras
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.requests import Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from openai import OpenAI
@@ -310,6 +312,99 @@ def admin_questions_json():
         conn.close()
 
 
+@app.delete("/admin/questions/{question_id}")
+def admin_delete_question(question_id: int):
+    """Delete one question by id."""
+    conn = _db_connect()
+    if not conn:
+        return {"error": "DATABASE_URL not configured"}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM questions WHERE id = %s", (question_id,))
+            if cur.rowcount == 0:
+                return {"error": "Not found", "id": question_id}
+        return {"ok": True, "id": question_id}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+
+def _get_question_by_id(question_id: int):
+    """Return one row as dict or None."""
+    conn = _db_connect()
+    if not conn:
+        return None
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT id, question, answer, asked_at FROM questions WHERE id = %s", (question_id,))
+            return cur.fetchone()
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+@app.get("/admin/questions/{question_id}/edit", response_class=HTMLResponse)
+def admin_edit_page(question_id: int):
+    """Show edit form for one question."""
+    row = _get_question_by_id(question_id)
+    if not row:
+        return HTMLResponse("<p>Question not found.</p><a href='/admin'>Back to admin</a>", status_code=404)
+    q_esc = html.escape(str(row["question"]))
+    a_esc = html.escape(str(row["answer"] or ""))
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Edit question #{question_id}</title>
+<style>
+  body{{font-family:system-ui,sans-serif;background:#1a1b26;color:#c0caf5;padding:2rem;max-width:720px;}}
+  h1{{color:#7aa2f7;}}
+  label{{display:block;margin-top:1rem;color:#a9b1d6;}}
+  input,textarea{{width:100%;padding:0.5rem;background:#24283b;border:1px solid #414868;color:#c0caf5;border-radius:6px;margin-top:0.25rem;}}
+  textarea{{min-height:120px;}}
+  .btn{{display:inline-block;margin-top:1rem;padding:0.5rem 1rem;border-radius:6px;cursor:pointer;border:none;font-weight:600;}}
+  .btn-save{{background:#7aa2f7;color:#1a1b26;}}
+  .btn-cancel{{background:#414868;color:#c0caf5;margin-left:0.5rem;}}
+  .btn:hover{{opacity:0.9;}}
+</style>
+</head>
+<body>
+<h1>Edit question #{question_id}</h1>
+<form method="post" action="/admin/questions/{question_id}/edit">
+  <label>Question</label>
+  <textarea name="question" rows="3">{q_esc}</textarea>
+  <label>Answer</label>
+  <textarea name="answer" rows="6">{a_esc}</textarea>
+  <button type="submit" class="btn btn-save">Save</button>
+  <a href="/admin" class="btn btn-cancel">Cancel</a>
+</form>
+</body>
+</html>"""
+
+
+@app.post("/admin/questions/{question_id}/edit")
+async def admin_edit_post(question_id: int, request: Request):
+    """Update question and answer; redirect to admin."""
+    form = await request.form()
+    question = (form.get("question") or "").strip()
+    answer = (form.get("answer") or "").strip()
+    conn = _db_connect()
+    if not conn:
+        return RedirectResponse(url="/admin", status_code=302)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE questions SET question = %s, answer = %s WHERE id = %s",
+                (question, answer, question_id),
+            )
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    return RedirectResponse(url="/admin", status_code=302)
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page():
     """Simple HTML dashboard showing all user questions."""
@@ -335,12 +430,14 @@ def admin_page():
         asked = str(r["asked_at"])[:19].replace("T", " ")
         q = str(r["question"]).replace("<", "&lt;").replace(">", "&gt;")
         a = str(r["answer"] or "")[:200].replace("<", "&lt;").replace(">", "&gt;")
+        rid = r["id"]
         rows_html += f"""
         <tr>
           <td>{r['id']}</td>
           <td>{asked}</td>
           <td>{q}</td>
           <td class="ans">{a}{"…" if len(str(r["answer"] or "")) > 200 else ""}</td>
+          <td class="acts"><a href="/admin/questions/{rid}/edit" class="act-btn edit">Edit</a> <button type="button" class="act-btn del" data-id="{rid}">Delete</button></td>
         </tr>"""
 
     error_html = f'<p class="err">{error}</p>' if error else ""
@@ -359,8 +456,13 @@ def admin_page():
   th{{background:#414868;color:#e0af68;padding:0.6rem 0.8rem;text-align:left;}}
   td{{padding:0.55rem 0.8rem;border-bottom:1px solid #414868;vertical-align:top;}}
   td.ans{{color:#a9b1d6;font-size:0.85rem;}}
+  td.acts{{white-space:nowrap;}}
   tr:hover td{{background:#24283b;}}
   .badge{{background:#7aa2f7;color:#1a1b26;border-radius:999px;padding:0.15rem 0.6rem;font-size:0.8rem;}}
+  .act-btn{{padding:0.3rem 0.6rem;border-radius:6px;font-size:0.8rem;cursor:pointer;text-decoration:none;border:none;}}
+  .act-btn.edit{{background:#7aa2f7;color:#1a1b26;}}
+  .act-btn.del{{background:#f7768e;color:#1a1b26;margin-left:0.25rem;}}
+  .act-btn:hover{{opacity:0.9;}}
 </style>
 </head>
 <body>
@@ -368,9 +470,22 @@ def admin_page():
 <p class="sub">Total questions: <span class="badge">{len(rows)}</span></p>
 {error_html}
 <table>
-  <thead><tr><th>#</th><th>Time</th><th>Question</th><th>Answer (preview)</th></tr></thead>
-  <tbody>{rows_html if rows_html else '<tr><td colspan="4" style="text-align:center;color:#a9b1d6;">No questions yet.</td></tr>'}</tbody>
+  <thead><tr><th>#</th><th>Time</th><th>Question</th><th>Answer (preview)</th><th>Actions</th></tr></thead>
+  <tbody>{rows_html if rows_html else '<tr><td colspan="5" style="text-align:center;color:#a9b1d6;">No questions yet.</td></tr>'}</tbody>
 </table>
+<script>
+document.querySelectorAll('.act-btn.del').forEach(function(btn){{
+  btn.onclick = function(){{
+    if(!confirm('Delete this question? This cannot be undone.')) return;
+    var id = this.getAttribute('data-id');
+    fetch('/admin/questions/' + id, {{ method: 'DELETE' }}).then(function(){{
+      location.reload();
+    }}).catch(function(){{
+      location.reload();
+    }});
+  }};
+}});
+</script>
 </body>
 </html>"""
 
