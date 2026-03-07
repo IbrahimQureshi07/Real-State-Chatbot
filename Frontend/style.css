@@ -70,6 +70,54 @@ header p {
   background: #414868;
   color: #c0caf5;
 }
+.message.bot strong {
+  font-weight: 700;
+  color: #e0af68;
+}
+.message.bot .chat-link {
+  color: #7aa2f7;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.message.bot .chat-link:hover {
+  color: #89b4fa;
+  text-decoration: underline;
+}
+
+.message-wrapper {
+  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.message-wrapper.user {
+  align-self: flex-end;
+}
+.message-wrapper.bot {
+  align-self: flex-start;
+}
+
+.suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0 0 0 0.25rem;
+}
+.suggestion-chip {
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid #7aa2f7;
+  background: transparent;
+  color: #7aa2f7;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.suggestion-chip:hover {
+  background: #7aa2f7;
+  color: #1a1b26;
+}
+
 .input-row {
   display: flex;
   gap: 0.5rem;

@@ -3,6 +3,7 @@ FastAPI backend: /chat endpoint + serves Frontend so you open one URL (no file:/
 Uses OpenAI for embeddings (1024 dims) and for answer generation. No sentence-transformers.
 """
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -80,22 +81,41 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[str]
+    suggestions: list[str] = []  # follow-up question chips for the user
 
 
-SYSTEM_PROMPT = """You are a helpful FAQ assistant for South Carolina Real Estate & Licensing (SCREC). Your answers must come from the "Context from FAQ" provided below when the question is about real estate or licensing.
+SYSTEM_PROMPT = """You are a helpful FAQ assistant for South Carolina Real Estate & Licensing (SCREC). Your answers must come from the "Context from FAQ" when the question is about real estate or licensing in South Carolina.
 
 Rules:
-1. If the user only says a greeting (hi, hello, hey) or something off-topic, reply in one short friendly sentence and invite them to ask about real estate or licensing in South Carolina.
+1. OFF-TOPIC (not real estate): If the user asks something completely unrelated (e.g. "who is Trump?", "what is 2+2?", politics, general knowledge), do NOT answer. Reply in one short sentence that you only answer questions about real estate and licensing in South Carolina, and invite them to ask about that.
 
-2. CONVERSATION MEMORY: If the user asks about the current or previous conversation (e.g. "what did I ask?", "what were we discussing?", "mainay abhi kia phucha?", "what was my last question?"), use the conversation history to answer briefly. Summarize what topics or questions they asked and what you answered. Do not give a generic greeting.
+2. REAL ESTATE but OUTSIDE OUR DATA: If the question is about real estate or licensing but refers to another state (e.g. North Carolina), or a topic not in our FAQ, give a brief helpful reply and HIGHLIGHT clearly: "Our FAQ covers South Carolina only. We do not have information about [North Carolina / that topic] here—please check the relevant state board or source." If you have related South Carolina info from the context, add it. Make it obvious what is from our FAQ vs what is not.
 
-3. When the user asks about real estate or licensing: Use the "Context from FAQ" below. When that context contains real FAQ content, write a clear, direct answer in plain language. Do not say you lack information when the context clearly contains the answer.
+3. CONVERSATION MEMORY: If the user asks about the current or previous conversation (e.g. "what did I ask?", "mainay abhi kia phucha?"), use the conversation history to answer briefly. Do not give a generic greeting.
 
-4. IMPORTANT – Links and URLs: If the context contains any URLs, application links, or PDF links, you MUST include those exact links in your answer when relevant. Do not reply with "contact the Commission" when the context already provides the specific link.
+4. When the user asks about real estate or licensing in South Carolina: Use the "Context from FAQ" below. When that context contains real FAQ content, write a clear, direct answer in plain language. Do not say you lack information when the context clearly contains the answer.
 
-5. Only say you don't have specific information when the context is literally "(No relevant FAQ context found.)" or empty.
+5. Links and URLs: If the context contains any URLs or application links, include those exact links in your answer when relevant.
 
-6. Do not make up facts. Do not include "Q:" or question numbers. Keep the tone helpful and professional."""
+6. Only say you don't have specific information when the context is literally "(No relevant FAQ context found.)" or empty.
+
+7. Do not make up facts. No "Q:" or question numbers. Use plain text only (no LaTeX: use "2/5" not \\frac{2}{5}).
+
+8. SUGGESTED FOLLOW-UPS: At the very end of your answer, add exactly one line in this format (no other text after it):
+Suggested follow-ups: [Short question 1?] | [Short question 2?] | [Short question 3?]
+Use 2–3 short, related follow-up questions the user might want to ask next (e.g. "How to apply online?", "How many hours for Unit I?", "When is the state exam?"). Keep them relevant to real estate or licensing in South Carolina. Use the pipe character | to separate them. If the user asked something completely off-topic, you may use generic suggestions like "What is real estate?" or "How do I get licensed in South Carolina?"."""
+
+
+def _parse_suggestions_from_answer(answer: str) -> tuple[str, list[str]]:
+    """Extract 'Suggested follow-ups: Q1 | Q2 | Q3' from end of answer; return (clean_answer, suggestions)."""
+    pattern = r"\n*Suggested follow-ups:\s*([^\n]+)$"
+    match = re.search(pattern, answer, re.IGNORECASE)
+    if not match:
+        return answer.strip(), []
+    raw = match.group(1).strip()
+    clean_answer = answer[: match.start()].strip()
+    parts = [p.strip() for p in raw.split("|") if p.strip()][:3]
+    return clean_answer, parts
 
 
 def generate_answer_with_openai(
@@ -143,7 +163,7 @@ def _embedding_query(message: str) -> str:
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     if not req.message.strip():
-        return ChatResponse(answer="Please ask a question.", sources=[])
+        return ChatResponse(answer="Please ask a question.", sources=[], suggestions=[])
 
     index = get_index()
     query_for_retrieval = _embedding_query(req.message.strip())
@@ -172,12 +192,13 @@ def chat(req: ChatRequest):
 
     answer = generate_answer_with_openai(req.message.strip(), context_for_llm, history_dicts)
     if answer:
-        return ChatResponse(answer=answer, sources=[])
+        clean_answer, suggestions = _parse_suggestions_from_answer(answer)
+        return ChatResponse(answer=clean_answer, sources=[], suggestions=suggestions)
     if texts:
         answer = "\n\n".join(texts)[:8000]
     else:
         answer = "No relevant answer found in the FAQ. Try asking about real estate or licensing in South Carolina."
-    return ChatResponse(answer=answer, sources=sources)
+    return ChatResponse(answer=answer, sources=sources, suggestions=[])
 
 
 @app.get("/health")
