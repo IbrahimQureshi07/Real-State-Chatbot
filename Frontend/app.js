@@ -117,3 +117,26 @@ form.addEventListener("submit", async (e) => {
   if (!question) return;
   await sendMessage(question);
 });
+
+// Friendly welcome message when chat opens
+(function showWelcome() {
+  const welcome = "Hi there! 👋 I'm your South Carolina Real Estate & Licensing assistant. Ask me anything about licensing requirements, exams, CE hours, fees, applications, or general real estate topics. How can I help you today?";
+  const wrapper = document.createElement("div");
+  wrapper.className = "message-wrapper bot";
+  const div = document.createElement("div");
+  div.className = "message bot";
+  div.innerHTML = renderBotMessage(welcome);
+  wrapper.appendChild(div);
+  const chips = document.createElement("div");
+  chips.className = "suggestion-chips";
+  ["How do I get licensed in SC?", "What are the CE requirements?", "How to apply online?"].forEach((q) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "suggestion-chip";
+    chip.textContent = q;
+    chip.addEventListener("click", () => sendMessage(q));
+    chips.appendChild(chip);
+  });
+  wrapper.appendChild(chips);
+  messagesEl.appendChild(wrapper);
+})();
