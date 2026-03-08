@@ -175,3 +175,157 @@ header p {
   0%, 60%, 100% { transform: translateY(0); }
   30% { transform: translateY(-6px); }
 }
+
+/* Message actions: Copy + Was this helpful? */
+.message-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  padding: 0.25rem 0 0 0.25rem;
+}
+.action-btn {
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid #414868;
+  background: #1a1b26;
+  color: #a9b1d6;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.action-btn:hover:not(:disabled) {
+  border-color: #7aa2f7;
+  color: #7aa2f7;
+}
+.action-btn.thumb {
+  font-size: 1rem;
+  padding: 0.25rem 0.5rem;
+}
+.action-btn.thumb.active {
+  border-color: #7aa2f7;
+  background: rgba(122, 162, 247, 0.2);
+}
+.action-btn:disabled {
+  opacity: 0.8;
+  cursor: default;
+}
+.helpful-label {
+  font-size: 0.8rem;
+  color: #a9b1d6;
+}
+
+/* Theme toggle in header */
+header {
+  position: relative;
+}
+.theme-toggle {
+  position: absolute;
+  top: 50%;
+  right: 1rem;
+  transform: translateY(-50%);
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid #414868;
+  border-radius: 8px;
+  background: #1a1b26;
+  color: #c0caf5;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.theme-toggle:hover {
+  border-color: #7aa2f7;
+  background: #24283b;
+}
+
+/* Light theme */
+body.theme-light {
+  background: #e8eaf0;
+  color: #1a1b26;
+}
+body.theme-light .container {
+  background: #fff;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+}
+body.theme-light header {
+  border-bottom-color: #d4d6e0;
+}
+body.theme-light header h1 {
+  color: #3b5bdb;
+}
+body.theme-light header p {
+  color: #5c5f7a;
+}
+body.theme-light .message.user {
+  background: #3b5bdb;
+  color: #fff;
+}
+body.theme-light .message.bot {
+  background: #e8eaf0;
+  color: #1a1b26;
+}
+body.theme-light .message.bot strong {
+  color: #b8860b;
+}
+body.theme-light .message.bot .chat-link {
+  color: #3b5bdb;
+}
+body.theme-light .message.bot .chat-link:hover {
+  color: #5b7bf7;
+}
+body.theme-light .suggestion-chip {
+  border-color: #3b5bdb;
+  color: #3b5bdb;
+}
+body.theme-light .suggestion-chip:hover {
+  background: #3b5bdb;
+  color: #fff;
+}
+body.theme-light .input-row {
+  border-top-color: #d4d6e0;
+}
+body.theme-light #input {
+  border-color: #d4d6e0;
+  background: #fff;
+  color: #1a1b26;
+}
+body.theme-light #input:focus {
+  border-color: #3b5bdb;
+}
+body.theme-light #send {
+  background: #3b5bdb;
+  color: #fff;
+}
+body.theme-light #send:hover {
+  background: #5b7bf7;
+}
+body.theme-light .message-actions .action-btn {
+  border-color: #d4d6e0;
+  background: #f0f1f6;
+  color: #5c5f7a;
+}
+body.theme-light .message-actions .action-btn:hover:not(:disabled) {
+  border-color: #3b5bdb;
+  color: #3b5bdb;
+}
+body.theme-light .message-actions .action-btn.thumb.active {
+  border-color: #3b5bdb;
+  background: rgba(59, 91, 219, 0.15);
+}
+body.theme-light .helpful-label {
+  color: #5c5f7a;
+}
+body.theme-light .theme-toggle {
+  border-color: #d4d6e0;
+  background: #f0f1f6;
+  color: #1a1b26;
+}
+body.theme-light .theme-toggle:hover {
+  border-color: #3b5bdb;
+  background: #e8eaf0;
+}
+body.theme-light .loader-wrap .dot {
+  background: #5c5f7a;
+}

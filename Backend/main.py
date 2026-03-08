@@ -77,7 +77,16 @@ def init_db():
                     asked_at  TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
-        print("[DB] Table 'questions' ready.")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS feedback (
+                    id         SERIAL PRIMARY KEY,
+                    question   TEXT NOT NULL,
+                    answer     TEXT,
+                    helpful    BOOLEAN NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+        print("[DB] Tables 'questions' and 'feedback' ready.")
     except Exception as e:
         print(f"[DB] init error: {e}")
     finally:
@@ -97,6 +106,23 @@ def log_question(question: str, answer: str) -> None:
             )
     except Exception as e:
         print(f"[DB] log error: {e}")
+    finally:
+        conn.close()
+
+
+def log_feedback(question: str, answer: str, helpful: bool) -> None:
+    """Store thumbs up/down feedback. Silently skips on error."""
+    conn = _db_connect()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO feedback (question, answer, helpful) VALUES (%s, %s, %s)",
+                (question, (answer or "")[:500], helpful),
+            )
+    except Exception as e:
+        print(f"[DB] feedback log error: {e}")
     finally:
         conn.close()
 
@@ -297,6 +323,19 @@ def chat(req: ChatRequest):
         answer = "No relevant answer found in the FAQ. Try asking about real estate or licensing in South Carolina."
     log_question(req.message.strip(), answer)
     return ChatResponse(answer=answer, sources=sources, suggestions=DEFAULT_SUGGESTIONS)
+
+
+class FeedbackRequest(BaseModel):
+    question: str
+    answer: str = ""
+    helpful: bool  # True = thumbs up, False = thumbs down
+
+
+@app.post("/feedback")
+def feedback(req: FeedbackRequest):
+    """Store was-this-helpful (thumbs up/down) feedback."""
+    log_feedback(req.question.strip(), req.answer.strip(), req.helpful)
+    return {"ok": True}
 
 
 @app.get("/health")
