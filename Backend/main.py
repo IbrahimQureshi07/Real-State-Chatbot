@@ -457,9 +457,10 @@ async def admin_edit_post(question_id: int, request: Request):
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page():
-    """Simple HTML dashboard showing all user questions."""
+    """Simple HTML dashboard showing all user questions and thumbs feedback."""
     conn = _db_connect()
     rows = []
+    feedback_rows = []
     error = ""
     if not conn:
         error = "DATABASE_URL not configured – logging is disabled."
@@ -470,6 +471,10 @@ def admin_page():
                     "SELECT id, question, answer, asked_at FROM questions ORDER BY asked_at DESC"
                 )
                 rows = cur.fetchall()
+                cur.execute(
+                    "SELECT id, question, answer, helpful, created_at FROM feedback ORDER BY created_at DESC"
+                )
+                feedback_rows = cur.fetchall()
         except Exception as e:
             error = str(e)
         finally:
@@ -488,6 +493,21 @@ def admin_page():
           <td>{q}</td>
           <td class="ans">{a}{"…" if len(str(r["answer"] or "")) > 200 else ""}</td>
           <td class="acts"><a href="/admin/questions/{rid}/edit" class="act-btn edit">Edit</a> <button type="button" class="act-btn del" data-id="{rid}">Delete</button></td>
+        </tr>"""
+
+    feedback_rows_html = ""
+    for r in feedback_rows:
+        created = str(r["created_at"])[:19].replace("T", " ")
+        q = str(r["question"] or "").replace("<", "&lt;").replace(">", "&gt;")[:150]
+        a = str(r["answer"] or "")[:150].replace("<", "&lt;").replace(">", "&gt;")
+        helpful = "👍 Yes" if r["helpful"] else "👎 No"
+        feedback_rows_html += f"""
+        <tr>
+          <td>{r['id']}</td>
+          <td>{created}</td>
+          <td>{q}{"…" if len(str(r["question"] or "")) > 150 else ""}</td>
+          <td class="ans">{a}{"…" if len(str(r["answer"] or "")) > 150 else ""}</td>
+          <td class="helpful">{helpful}</td>
         </tr>"""
 
     error_html = f'<p class="err">{error}</p>' if error else ""
@@ -513,6 +533,8 @@ def admin_page():
   .act-btn.edit{{background:#7aa2f7;color:#1a1b26;}}
   .act-btn.del{{background:#f7768e;color:#1a1b26;margin-left:0.25rem;}}
   .act-btn:hover{{opacity:0.9;}}
+  h2{{color:#7aa2f7;font-size:1.1rem;margin-top:2.5rem;margin-bottom:0.25rem;}}
+  td.helpful{{font-weight:600;}}
 </style>
 </head>
 <body>
@@ -522,6 +544,12 @@ def admin_page():
 <table>
   <thead><tr><th>#</th><th>Time</th><th>Question</th><th>Answer (preview)</th><th>Actions</th></tr></thead>
   <tbody>{rows_html if rows_html else '<tr><td colspan="5" style="text-align:center;color:#a9b1d6;">No questions yet.</td></tr>'}</tbody>
+</table>
+<h2>Was this helpful? – Feedback</h2>
+<p class="sub">Thumbs up/down from users: <span class="badge">{len(feedback_rows)}</span></p>
+<table>
+  <thead><tr><th>#</th><th>Time</th><th>Question</th><th>Answer (preview)</th><th>Helpful</th></tr></thead>
+  <tbody>{feedback_rows_html if feedback_rows_html else '<tr><td colspan="5" style="text-align:center;color:#a9b1d6;">No feedback yet.</td></tr>'}</tbody>
 </table>
 <script>
 document.querySelectorAll('.act-btn.del').forEach(function(btn){{
