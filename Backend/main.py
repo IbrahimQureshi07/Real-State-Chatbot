@@ -186,9 +186,11 @@ B. OFF-TOPIC (do NOT answer, be gentle):
 
 7. FORMAT: Plain text only. No LaTeX. Write fractions as "2/5" not \\frac{2}{5}. No "Q:" prefixes.
 
-8. SUGGESTED FOLLOW-UPS: At the very end of every answer, on its own line, add:
-Suggested follow-ups: [Short question 1?] | [Short question 2?] | [Short question 3?]
-Make them short, natural, and relevant to what the user just asked. 2–3 suggestions separated by |."""
+8. SUGGESTED FOLLOW-UPS (MANDATORY for every answer): You MUST end EVERY answer with these two things — no exceptions.
+   (a) One short line that directly offers the follow-up options in a conversational way. Use this style: "Do you wanna know what the cost for the licence is, or you want me to recommend a specific course? Try these:" or "Want to know the fees, how to apply, or what courses you need? Ask any of these:" — i.e. mention the actual topics (cost, course, fees, apply, etc.) that match the chips below. Keep it natural and specific to the question.
+   FORBIDDEN — never use: "If you have further questions...", "If you have more specific questions...", "feel free to ask!", "let me know!", "need clarification...". Those are generic; always use a line that teases the specific follow-ups (cost, course, fees, process, etc.) instead.
+   (b) On the next line, exactly: Suggested follow-ups: [Short question 1?] | [Short question 2?] | [Short question 3?]
+   Make 2–3 suggestions relevant to the question. Separate with |. Never skip (a) or (b)."""
 
 
 def _parse_suggestions_from_answer(answer: str) -> tuple[str, list[str]]:
@@ -275,9 +277,18 @@ def chat(req: ChatRequest):
     if req.history:
         history_dicts = [{"role": h.role, "content": h.content} for h in req.history]
 
+    # Fallback suggestions so chips always show when we have an answer
+    DEFAULT_SUGGESTIONS = [
+        "What are the licence fees?",
+        "How to apply online?",
+        "What courses are required?",
+    ]
+
     answer = generate_answer_with_openai(req.message.strip(), context_for_llm, history_dicts)
     if answer:
         clean_answer, suggestions = _parse_suggestions_from_answer(answer)
+        if not suggestions and clean_answer.strip():
+            suggestions = DEFAULT_SUGGESTIONS
         log_question(req.message.strip(), clean_answer)
         return ChatResponse(answer=clean_answer, sources=[], suggestions=suggestions)
     if texts:
@@ -285,7 +296,7 @@ def chat(req: ChatRequest):
     else:
         answer = "No relevant answer found in the FAQ. Try asking about real estate or licensing in South Carolina."
     log_question(req.message.strip(), answer)
-    return ChatResponse(answer=answer, sources=sources, suggestions=[])
+    return ChatResponse(answer=answer, sources=sources, suggestions=DEFAULT_SUGGESTIONS)
 
 
 @app.get("/health")
