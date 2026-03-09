@@ -380,6 +380,24 @@ def admin_delete_question(question_id: int):
         conn.close()
 
 
+@app.delete("/admin/feedback/{feedback_id}")
+def admin_delete_feedback(feedback_id: int):
+    """Delete one feedback row by id."""
+    conn = _db_connect()
+    if not conn:
+        return {"error": "DATABASE_URL not configured"}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM feedback WHERE id = %s", (feedback_id,))
+            if cur.rowcount == 0:
+                return {"error": "Not found", "id": feedback_id}
+        return {"ok": True, "id": feedback_id}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+
 def _get_question_by_id(question_id: int):
     """Return one row as dict or None."""
     conn = _db_connect()
@@ -492,7 +510,7 @@ def admin_page():
           <td>{asked}</td>
           <td>{q}</td>
           <td class="ans">{a}{"…" if len(str(r["answer"] or "")) > 200 else ""}</td>
-          <td class="acts"><a href="/admin/questions/{rid}/edit" class="act-btn edit">Edit</a> <button type="button" class="act-btn del" data-id="{rid}">Delete</button></td>
+          <td class="acts"><button type="button" class="act-btn del" data-id="{rid}">Delete</button></td>
         </tr>"""
 
     feedback_rows_html = ""
@@ -501,6 +519,7 @@ def admin_page():
         q = str(r["question"] or "").replace("<", "&lt;").replace(">", "&gt;")[:150]
         a = str(r["answer"] or "")[:150].replace("<", "&lt;").replace(">", "&gt;")
         helpful = "👍 Yes" if r["helpful"] else "👎 No"
+        fid = r["id"]
         feedback_rows_html += f"""
         <tr>
           <td>{r['id']}</td>
@@ -508,6 +527,7 @@ def admin_page():
           <td>{q}{"…" if len(str(r["question"] or "")) > 150 else ""}</td>
           <td class="ans">{a}{"…" if len(str(r["answer"] or "")) > 150 else ""}</td>
           <td class="helpful">{helpful}</td>
+          <td class="acts"><button type="button" class="act-btn del-feedback" data-id="{fid}">Delete</button></td>
         </tr>"""
 
     error_html = f'<p class="err">{error}</p>' if error else ""
@@ -548,8 +568,8 @@ def admin_page():
 <h2>Was this helpful? – Feedback</h2>
 <p class="sub">Thumbs up/down from users: <span class="badge">{len(feedback_rows)}</span></p>
 <table>
-  <thead><tr><th>#</th><th>Time</th><th>Question</th><th>Answer (preview)</th><th>Helpful</th></tr></thead>
-  <tbody>{feedback_rows_html if feedback_rows_html else '<tr><td colspan="5" style="text-align:center;color:#a9b1d6;">No feedback yet.</td></tr>'}</tbody>
+  <thead><tr><th>#</th><th>Time</th><th>Question</th><th>Answer (preview)</th><th>Helpful</th><th>Actions</th></tr></thead>
+  <tbody>{feedback_rows_html if feedback_rows_html else '<tr><td colspan="6" style="text-align:center;color:#a9b1d6;">No feedback yet.</td></tr>'}</tbody>
 </table>
 <script>
 document.querySelectorAll('.act-btn.del').forEach(function(btn){{
@@ -557,6 +577,17 @@ document.querySelectorAll('.act-btn.del').forEach(function(btn){{
     if(!confirm('Delete this question? This cannot be undone.')) return;
     var id = this.getAttribute('data-id');
     fetch('/admin/questions/' + id, {{ method: 'DELETE' }}).then(function(){{
+      location.reload();
+    }}).catch(function(){{
+      location.reload();
+    }});
+  }};
+}});
+document.querySelectorAll('.act-btn.del-feedback').forEach(function(btn){{
+  btn.onclick = function(){{
+    if(!confirm('Delete this feedback? This cannot be undone.')) return;
+    var id = this.getAttribute('data-id');
+    fetch('/admin/feedback/' + id, {{ method: 'DELETE' }}).then(function(){{
       location.reload();
     }}).catch(function(){{
       location.reload();
